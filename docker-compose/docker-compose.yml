@@ -1,0 +1,18 @@
+version: '2.2'
+services:
+    thingsboard:
+        image: "thingsboard/tb-postgres"
+        ports:
+            - "8080:9090"
+            - "1883:1883"
+            - "7070:7070"
+            - "5683-5688:5683-5688/udp"
+        environment:
+            TB_QUEUE_TYPE: rabbitmq
+            TB_QUEUE_RABBIT_MQ_USERNAME: "${USERNAME}"
+            TB_QUEUE_RABBIT_MQ_PASSWORD: ${PASSWORD}"
+            TB_QUEUE_RABBIT_MQ_HOST: localhost
+            TB_QUEUE_RABBIT_MQ_PORT: 5672
+        volumes:
+            - ./thingsboard/data:/data
+            - ./thingsboard/logs:/var/log/thingsboard
