@@ -1,23 +1,25 @@
 pub trait Capturing<'a> {
     fn new<'b: 'a, Processor>(&self, sound_processor: Processor, sample_rate: i32) -> Self
     where
-        Processor: 'b + FnMut(&mut [i16]);
-    fn run(&self);
+        Processor: 'b + Fn(Vec<i16>);
+    fn run(&mut self);
 }
 
 pub struct Audio<'a> {
-    ctx: soundio::Context<'a>,
     input_stream: soundio::InStream<'a>,
 }
 
 impl<'a> Capturing<'a> for Audio<'a> {
     fn new<'b: 'a, Processor>(&self, sound_processor: Processor, sample_rate: i32) -> Audio<'a>
     where
-        Processor: 'b + FnMut(&mut [i16]),
+        Processor: 'b + Fn(Vec<i16>),
     {
         let mut ctx: soundio::Context<'a> = soundio::Context::new();
         ctx.set_app_name("Recorder");
-        ctx.connect();
+        match ctx.connect() {
+            Err(e) => panic!("Error connecting soundio context: {}", e),
+            Ok(f) => f,
+        };
         ctx.flush_events();
 
         let dev = ctx.default_input_device().expect("No input device");
@@ -51,7 +53,7 @@ impl<'a> Capturing<'a> for Audio<'a> {
                     vector[f + m] = stream.sample::<i16>(c, f);
                 }
             }
-            sound_processor(&mut vector[..]);
+            sound_processor(vector);
         };
 
         let input_stream = match dev.open_instream(
@@ -68,12 +70,14 @@ impl<'a> Capturing<'a> for Audio<'a> {
         };
 
         Audio {
-            ctx: ctx,
             input_stream: input_stream,
         }
     }
 
-    fn run(&self) {
-        self.input_stream.start();
+    fn run(&mut self) {
+        match self.input_stream.start() {
+            Err(e) => panic!("Error starting stream: {}", e),
+            Ok(f) => f,
+        };
     }
 }
