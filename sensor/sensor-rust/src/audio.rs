@@ -1,18 +1,40 @@
+use crate::runner::MutableRunner;
+use serde_derive::Serialize;
+use std::collections::HashMap;
+
 pub trait Capturing<'a> {
-    fn new<'b: 'a, Processor>(&self, sound_processor: Processor, sample_rate: i32) -> Self
+    fn new<'b: 'a, Processor>(sound_forwarder: Processor, sample_rate: i32) -> Self
     where
-        Processor: 'b + Fn(Vec<i16>);
-    fn run(&mut self);
+        Processor: 'b + FnMut(Box<dyn erased_serde::Serialize>);
+}
+
+#[derive(Serialize)]
+struct AudioSenMl {
+    pub raw: HashMap<usize, Vec<i16>>,
+    pub raw_type: String,
+    pub channel_count: usize,
+    pub sample_count: usize,
+    pub sample_rate: i32,
 }
 
 pub struct Audio<'a> {
     input_stream: soundio::InStream<'a>,
 }
 
+impl<'a> MutableRunner<'a> for Audio<'a> {
+    fn start(&mut self) {
+        match self.input_stream.start() {
+            Err(e) => panic!("Error starting stream: {}", e),
+            Ok(f) => f,
+        };
+    }
+    fn stop(&mut self) {}
+}
+
 impl<'a> Capturing<'a> for Audio<'a> {
-    fn new<'b: 'a, Processor>(&self, sound_processor: Processor, sample_rate: i32) -> Audio<'a>
+    fn new<'b: 'a, Processor>(mut sound_forwarder: Processor, sample_rate: i32) -> Audio<'a>
     where
-        Processor: 'b + Fn(Vec<i16>),
+        Processor: 'b + FnMut(Box<dyn erased_serde::Serialize>),
     {
         let mut ctx: soundio::Context<'a> = soundio::Context::new();
         ctx.set_app_name("Recorder");
@@ -45,22 +67,38 @@ impl<'a> Capturing<'a> for Audio<'a> {
 
             let frames: usize = stream.frame_count();
             let channels: usize = stream.channel_count();
-            let size: usize = frames * channels;
-            let mut vector: Vec<i16> = vec![0; size];
+            let mut map = HashMap::new();
+            let getter = |cc, ff| {
+                let data = stream.sample::<i16>(cc, ff);
+                data
+            };
             for f in 0..frames {
                 for c in 0..channels {
-                    let m = c * f;
-                    vector[f + m] = stream.sample::<i16>(c, f);
+                    map.entry(c)
+                        .and_modify(|e: &mut Vec<i16>| e.push(getter(c, f)))
+                        .or_insert({
+                            let mut vec = Vec::new();
+                            vec.push(getter(c, f));
+                            vec
+                        });
                 }
             }
-            sound_processor(vector);
+            let ml = AudioSenMl {
+                raw: map,
+                raw_type: "S16LE".to_string(),
+                channel_count: channels,
+                sample_count: frames,
+                sample_rate: sample_rate,
+            };
+            let bml = Box::new(ml);
+            sound_forwarder(bml);
         };
 
         let input_stream = match dev.open_instream(
-            44100,
+            sample_rate,
             soundio::Format::S16LE,
             soundio::ChannelLayout::get_builtin(soundio::ChannelLayoutId::Stereo),
-            2.0,
+            1.0,
             read_callback,
             None::<fn()>,
             None::<fn(soundio::Error)>,
@@ -72,12 +110,5 @@ impl<'a> Capturing<'a> for Audio<'a> {
         Audio {
             input_stream: input_stream,
         }
-    }
-
-    fn run(&mut self) {
-        match self.input_stream.start() {
-            Err(e) => panic!("Error starting stream: {}", e),
-            Ok(f) => f,
-        };
     }
 }
