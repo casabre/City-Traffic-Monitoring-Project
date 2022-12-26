@@ -5,7 +5,7 @@ use std::collections::HashMap;
 pub trait Capturing<'a> {
     fn new<'b: 'a, Processor>(sound_forwarder: Processor, sample_rate: i32) -> Self
     where
-        Processor: 'b + FnMut(Box<dyn erased_serde::Serialize>);
+        Processor: 'b + Fn(Box<dyn erased_serde::Serialize>);
 }
 
 #[derive(Serialize)]
@@ -18,6 +18,7 @@ struct AudioSenMl {
 }
 
 pub struct Audio<'a> {
+    ctx: soundio::Context<'a>,
     input_stream: soundio::InStream<'a>,
 }
 
@@ -32,32 +33,11 @@ impl<'a> MutableRunner<'a> for Audio<'a> {
 }
 
 impl<'a> Capturing<'a> for Audio<'a> {
-    fn new<'b: 'a, Processor>(mut sound_forwarder: Processor, sample_rate: i32) -> Audio<'a>
+    fn new<'b: 'a, Processor>(sound_forwarder: Processor, sample_rate: i32) -> Audio<'a>
     where
-        Processor: 'b + FnMut(Box<dyn erased_serde::Serialize>),
+        Processor: 'b + Fn(Box<dyn erased_serde::Serialize>),
     {
-        let mut ctx: soundio::Context<'a> = soundio::Context::new();
-        ctx.set_app_name("Recorder");
-        match ctx.connect() {
-            Err(e) => panic!("Error connecting soundio context: {}", e),
-            Ok(f) => f,
-        };
-        ctx.flush_events();
-
-        let dev = ctx.default_input_device().expect("No input device");
-        if !dev.supports_layout(soundio::ChannelLayout::get_builtin(
-            soundio::ChannelLayoutId::Stereo,
-        )) {
-            panic!("Device doesn't support stereo");
-        }
-        if !dev.supports_format(soundio::Format::S16LE) {
-            panic!("Device doesn't support S16LE");
-        }
-        if !dev.supports_sample_rate(sample_rate) {
-            let khz: f32 = sample_rate as f32 / 1000.0;
-            panic!("Device doesn't {khz} kHz");
-        }
-
+        // Data preparation closure
         let read_callback = move |stream: &mut soundio::InStreamReader| {
             let frame_count_max = stream.frame_count_max();
             if let Err(e) = stream.begin_read(frame_count_max) {
@@ -94,21 +74,59 @@ impl<'a> Capturing<'a> for Audio<'a> {
             sound_forwarder(bml);
         };
 
-        let input_stream = match dev.open_instream(
-            sample_rate,
-            soundio::Format::S16LE,
-            soundio::ChannelLayout::get_builtin(soundio::ChannelLayoutId::Stereo),
-            1.0,
-            read_callback,
-            None::<fn()>,
-            None::<fn(soundio::Error)>,
-        ) {
-            Err(e) => panic!("Error creating stream: {}", e),
-            Ok(f) => f,
-        };
+        // Initialize soundio
+        let ctx = create_ctx().unwrap();
+        let input_stream: soundio::InStream;
+        {
+            let dev = create_dev(&ctx, sample_rate).unwrap();
+            input_stream = match dev.open_instream(
+                sample_rate,
+                soundio::Format::S16LE,
+                soundio::ChannelLayout::get_builtin(soundio::ChannelLayoutId::Stereo),
+                1.0,
+                read_callback,
+                None::<fn()>,
+                None::<fn(soundio::Error)>,
+            ) {
+                Err(e) => panic!("Error creating stream: {}", e),
+                Ok(f) => f,
+            };
+        }
 
         Audio {
+            ctx: ctx,
             input_stream: input_stream,
         }
     }
+}
+
+fn create_ctx<'a>() -> Result<soundio::Context<'a>, soundio::Error> {
+    let mut ctx = soundio::Context::new();
+    ctx.set_app_name("Recorder");
+    match ctx.connect() {
+        Err(e) => panic!("Error connecting soundio context: {}", e),
+        Ok(f) => f,
+    };
+    ctx.flush_events();
+    Ok(ctx)
+}
+
+fn create_dev<'a>(
+    ctx: &'a soundio::Context,
+    sample_rate: i32,
+) -> Result<soundio::Device<'a>, soundio::Error> {
+    let dev = ctx.default_input_device().expect("No input device");
+    if !dev.supports_layout(soundio::ChannelLayout::get_builtin(
+        soundio::ChannelLayoutId::Stereo,
+    )) {
+        panic!("Device doesn't support stereo");
+    }
+    if !dev.supports_format(soundio::Format::S16LE) {
+        panic!("Device doesn't support S16LE");
+    }
+    if !dev.supports_sample_rate(sample_rate) {
+        let khz: f32 = sample_rate as f32 / 1000.0;
+        panic!("Device doesn't support {khz} kHz");
+    }
+    Ok(dev)
 }
