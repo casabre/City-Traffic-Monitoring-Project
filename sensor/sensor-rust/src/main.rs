@@ -26,16 +26,12 @@ fn main() {
 }
 
 fn get_id() -> String {
-    let id = env::args()
-        .nth(1)
-        .unwrap_or_else(|| "sensor-data-abc".to_string());
+    let id = env::var("SENSOR_ID").unwrap_or_else(|_| "sensor-data-abc".to_string());
     id
 }
 
 fn get_url() -> String {
-    let url = env::args()
-        .nth(1)
-        .unwrap_or_else(|| "tcp://sctmp.ai:1883".to_string());
+    let url = env::var("MQTT_URL").unwrap_or_else(|_| "tcp://sctmp.ai:1883".to_string());
     url
 }
 
@@ -47,8 +43,6 @@ fn get_topics() -> HashMap<String, String> {
 
 fn get_sample_rate() -> i32 {
     let default = 2_i32.pow(14);
-    let sr = env::args()
-        .nth(1)
-        .unwrap_or_else(|| format!("{default}").to_string());
+    let sr = env::var("SAMPLE_RATE").unwrap_or_else(|_| format!("{default}").to_string());
     sr.parse::<i32>().unwrap()
 }
