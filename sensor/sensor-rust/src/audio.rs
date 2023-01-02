@@ -1,6 +1,7 @@
 use crate::runner::MutableRunner;
 use serde_derive::Serialize;
 use std::collections::HashMap;
+use std::env;
 
 pub trait Capturing<'a> {
     fn new<'b: 'a, Processor>(sound_forwarder: Processor, sample_rate: i32) -> Self
@@ -115,18 +116,41 @@ fn create_dev<'a>(
     ctx: &'a soundio::Context,
     sample_rate: i32,
 ) -> Result<soundio::Device<'a>, soundio::Error> {
-    let dev = ctx.default_input_device().expect("No input device");
-    if !dev.supports_layout(soundio::ChannelLayout::get_builtin(
-        soundio::ChannelLayoutId::Stereo,
-    )) {
+    let device_name = env::var("INPUT_DEVICE").unwrap_or("".to_string());
+    let mut dev: Option<soundio::Device> = None;
+    if !device_name.is_empty() {
+        let devices = ctx.input_devices().unwrap();
+        for device in devices {
+            let name = device.name().to_lowercase();
+            dev = match name {
+                device_name => Some(device),
+                _ => None,
+            };
+        }
+    }
+    if let None = dev {
+        dev = Some(ctx.default_input_device().expect("No input device"));
+        println!("Using default input device")
+    }
+    if !dev
+        .as_ref()
+        .unwrap()
+        .supports_layout(soundio::ChannelLayout::get_builtin(
+            soundio::ChannelLayoutId::Stereo,
+        ))
+    {
         panic!("Device doesn't support stereo");
     }
-    if !dev.supports_format(soundio::Format::S16LE) {
+    if !dev
+        .as_ref()
+        .unwrap()
+        .supports_format(soundio::Format::S16LE)
+    {
         panic!("Device doesn't support S16LE");
     }
-    if !dev.supports_sample_rate(sample_rate) {
+    if !dev.as_ref().unwrap().supports_sample_rate(sample_rate) {
         let khz: f32 = sample_rate as f32 / 1000.0;
         panic!("Device doesn't support {khz} kHz");
     }
-    Ok(dev)
+    Ok(dev.unwrap())
 }
