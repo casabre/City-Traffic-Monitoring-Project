@@ -1,4 +1,4 @@
-# City Traffic Monitoring Project
+# Smart City Transformation Monitoring Project
 
 > Monitor different sensor levels in cities and analyze the data in the cloud
 
